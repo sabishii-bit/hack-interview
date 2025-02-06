@@ -10,38 +10,48 @@ from src.button import OFF_IMAGE, ON_IMAGE
 def handle_events(window: sg.Window, event: str, values: Dict[str, Any]) -> None:
     """
     Handle the events. Record audio, transcribe audio, generate quick and full answers.
-
-    Args:
-        window (sg.Window): The window element.
-        event (str): The event.
-        values (Dict[str, Any]): The values of the window.
     """
-    # If the user is not focused on the position input, process the events
-    focused_element: sg.Element = window.find_element_with_focus()
-    if not focused_element or focused_element.Key != "-POSITION_INPUT-":
-        if event in ("r", "R", "-RECORD_BUTTON-"):
-            recording_event(window)
-        elif event in ("a", "A", "-ANALYZE_BUTTON-"):
-            transcribe_event(window)
+    try:
+        # Safely get focused element with error handling
+        focused_element: sg.Element = None
+        try:
+            focused_element = window.find_element_with_focus()
+        except KeyError as e:
+            if 'popdown' in str(e):
+                # Ignore internal Tkinter popdown focus issues
+                return
+            raise
 
-    # If the user is focused on the position input
+        # Process events only if not focused on position input or no focus
+        position_input_focused = (
+            focused_element and 
+            hasattr(focused_element, 'Key') and 
+            focused_element.Key == "-POSITION_INPUT-"
+        )
+        
+        if not position_input_focused:
+            if event in ("r", "R", "-RECORD_BUTTON-"):
+                recording_event(window)
+            elif event in ("a", "A", "-ANALYZE_BUTTON-"):
+                transcribe_event(window)
+
+    except Exception as e:
+        logger.error(f"Error handling events: {str(e)}")
+        return
+
+    # Rest of the event handling remains the same
     if event[:6] in ("Return", "Escape"):
         window["-ANALYZE_BUTTON-"].set_focus()
 
-    # When the transcription is ready
     elif event == "-WHISPER-":
         answer_events(window, values)
 
-    # When the quick answer is ready
     elif event == "-QUICK_ANSWER-":
         logger.debug("Quick answer generated.")
-        print("Quick answer:", values["-QUICK_ANSWER-"])
         window["-QUICK_ANSWER-"].update(values["-QUICK_ANSWER-"])
 
-    # When the full answer is ready
     elif event == "-FULL_ANSWER-":
         logger.debug("Full answer generated.")
-        print("Full answer:", values["-FULL_ANSWER-"])
         window["-FULL_ANSWER-"].update(values["-FULL_ANSWER-"])
 
 

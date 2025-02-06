@@ -149,6 +149,35 @@ def create_column(
         expand_y=True,
     )
 
+def create_scrollable_text_area(
+    text: str = "",
+    size: Optional[Tuple[int, int]] = None,
+    key: str = "",
+    text_color: str = None,
+) -> sg.Multiline:
+    """
+    Create a scrollable text area element using sg.Multiline.
+
+    Args:
+        text (str, optional): The initial text. Defaults to "".
+        size (Optional[Tuple[int, int]], optional): The size (width, height) in characters. Defaults to None.
+        key (str, optional): The key for the element. Defaults to "".
+        text_color (str, optional): The text color. Defaults to None.
+
+    Returns:
+        sg.Multiline: The Multiline element with scrollbars.
+    """
+    return sg.Multiline(
+        default_text=text,
+        size=size,
+        key=key,
+        background_color=sg.theme_background_color(),
+        text_color=text_color,
+        expand_x=True,
+        expand_y=True,
+        disabled=True,  # Makes the text area read-only
+        autoscroll=True,  # Automatically scroll to the bottom when new text is added
+    )
 
 def build_layout() -> (
     List[List[Union[sg.Text, sg.Button, sg.Frame, sg.Combo, sg.Input]]]
@@ -180,13 +209,13 @@ def build_layout() -> (
         subsample=2,
     )
 
-    transcribed_text: sg.Text = create_text_area(
+    transcribed_text = create_scrollable_text_area(
         size=(APPLICATION_WIDTH, 3), key="-TRANSCRIBED_TEXT-", text_color="white"
     )
-    quick_answer: sg.Text = create_text_area(
+    quick_answer = create_scrollable_text_area(
         size=(APPLICATION_WIDTH, 7), key="-QUICK_ANSWER-", text_color="white"
     )
-    full_answer: sg.Text = create_text_area(
+    full_answer = create_scrollable_text_area(
         size=(APPLICATION_WIDTH, 20), key="-FULL_ANSWER-", text_color="white"
     )
 

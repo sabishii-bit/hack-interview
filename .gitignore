@@ -4,6 +4,7 @@
 .Spotlight-V100
 Thumbs.db
 $RECYCLE.BIN/
+/python3.11
 
 # VsCode
 .vscode

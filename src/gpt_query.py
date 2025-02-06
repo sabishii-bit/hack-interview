@@ -10,7 +10,7 @@ You will receive an audio transcription of the question. It may not be complete.
 """
 
 SHORT_INSTRUCTION: str = "Concisely respond, limiting your answer to 50 words."
-LONG_INSTRUCTION: str = "Before answering, take a deep breath and think one step at a time. Believe the answer in no more than 150 words."
+LONG_INSTRUCTION: str = "Generate code examples for the instruction in question."
 
 load_dotenv()
 
