@@ -9,8 +9,8 @@ SYS_SUFFIX: str = """ position.
 You will receive an audio transcription of the question. It may not be complete. You need to understand the question and write an answer to it.\n
 """
 
-SHORT_INSTRUCTION: str = "Concisely respond, limiting your answer to 50 words."
-LONG_INSTRUCTION: str = "Generate code examples for the instruction in question."
+SHORT_INSTRUCTION: str = "Concisely respond, limiting your answer to around 100 words. Provide Space/Time complexity for algorithms."
+LONG_INSTRUCTION: str = "Limit long responses for code snippets. If asked about an algorithm, just provide the code, avoid extra text. When generating code snippets, avoid Markdown formatting, just use plaintext. Default to Python if language is not mentioned."
 
 load_dotenv()
 

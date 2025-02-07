@@ -1,327 +1,254 @@
-from typing import List, Optional, Tuple, Union
-
-import PySimpleGUI as sg
-
-from src.button import GREY_BUTTON, OFF_IMAGE
-from src.config import APPLICATION_WIDTH, DEFAULT_MODEL, MODELS, THEME
-
-
-class BtnInfo:
-    """
-    A class to store the state of a button.
-    """
-
-    def __init__(self, state: bool = False) -> None:
-        self.state: bool = state
+import time
+import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext
+from tkhtmlview import HTMLScrolledText 
+import markdown2
+import threading
+from loguru import logger
+from src.gpt_query import transcribe_audio, generate_answer
+from src.config import *
+from src.audio import AudioRecorder
+from src.keybinds import KeybindManager, KeybindDialog
 
 
-def create_button(
-    key: str,
-    tooltip: str,
-    text: str = "",
-    image_data: str = None,
-    subsample: int = 1,
-    standard: bool = False,
-) -> sg.Button:
-    """
-    Create a button element with the given parameters.
+class InterviewGUI:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("( > w < ; )")
+        self.keybind_manager = KeybindManager()
+        self.keybind_manager.add_callback(self._update_bindings)
+        self._configure_window()
+        self._setup_state()
+        self._create_widgets()
+        self._setup_bindings()
+        self.audio = AudioRecorder()
 
-    Args:
-        key (str): The key of the button.
-        tooltip (str): The tooltip of the button.
-        text (str, optional): The text of the button. Defaults to "".
-        image_data (str, optional): The image data of the button. Defaults to None.
-        subsample (int, optional): The subsample of the image. Defaults to 1.
-        standard (bool, optional): Whether to use the standard theme. Defaults to False.
+    def _configure_window(self):
+        self.root.geometry("1000x800")
+        self.root.configure(bg='#2d2d2d')
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.style = ttk.Style()
+        self.style.theme_use('clam')
+        self._configure_styles()
 
-    Returns:
-        sg.Button: The button element.
-    """
-    if not standard:
-        theme_bg_color: str = sg.theme_background_color()
-        color = (theme_bg_color, theme_bg_color)
-    else:
-        color = None
+    def _setup_state(self):
+        self.is_recording = False
+        self.audio_frames = []
+        self.current_position = DEFAULT_POSITION
 
-    return sg.Button(
-        image_data=image_data,
-        key=key,
-        image_subsample=subsample,
-        border_width=0,
-        tooltip=tooltip,
-        button_color=color,
-        disabled_button_color=color,
-        metadata=BtnInfo(),
-        button_text=text,
-    )
+    def _configure_styles(self):
+        bg_color = "#2d2d2d"
+        text_color = "#ffffff"
+        # Configure root element backgrounds
+        self.root.configure(bg=bg_color)
+        
+        # Style base elements (match to main theme)
+        self.style.configure('.', 
+                            background=bg_color,
+                            foreground=text_color)
+        self.style.configure('TFrame', background=bg_color)
+        self.style.configure('TButton', 
+                          background='#404040', 
+                          foreground=text_color,
+                          padding=6)
+        self.style.map('TButton', background=[('active', '#505050')])
+        self.style.configure('TLabel', background=bg_color, foreground=text_color)
+        self.style.configure('TEntry', fieldbackground='#FFFFFF', foreground="#000000")
+        self.style.configure('TCombobox', fieldbackground='#FFFFFF', foreground="#000000")
+        self.style.configure('Settings.TButton', 
+                        background='#505050',
+                        font=('Helvetica', 10))
+        self.style.map('Settings.TButton',
+                    background=[('active', '#606060')])
 
+        # Handle sash (divider) elements
+        self.style.configure('Sash',
+                            gripcount=0,
+                            width=3,
+                            background='#404040',
+                            troughcolor=bg_color)
+        
+        # Force dark sash style for paned windows
+        self.style.layout('TPanedWindow',
+                        [('Sash.horizontal', {'sticky': 'nswe'})])
 
-def create_text_area(
-    text: str = "",
-    size: Optional[Tuple[int, int]] = None,
-    key: str = "",
-    text_color: str = None,
-) -> sg.Text:
-    """
-    Create a text area element with the given parameters.
-
-    Args:
-        text (str, optional): The text of the text area. Defaults to "".
-        size (Optional[Tuple[int, int]], optional): The size of the text area. Defaults to None.
-        key (str, optional): The key of the text area. Defaults to "".
-        text_color (str, optional): The color of the text. Defaults to None.
-
-    Returns:
-        sg.Text: The text area element.
-    """
-    return sg.Text(
-        text=text,
-        size=size,
-        key=key,
-        background_color=sg.theme_background_color(),
-        text_color=text_color,
-        expand_x=True,
-        expand_y=True,
-    )
-
-
-def name(name: str) -> sg.Text:
-    """
-    Create a text element with spaces to the right.
-
-    Args:
-        name (str): The name of the text element.
-
-    Returns:
-        sg.Text: The text element.
-    """
-    spaces: int = 15 - len(name) - 2
-    return sg.Text(
-        name + " " * spaces,
-    )
-
-
-def create_frame(
-    layout: List[List[Union[sg.Element, sg.Element]]] = [[]],
-    title: str = "",
-    key: str = "",
-    border: int = 0,
-) -> sg.Frame:
-    """
-    Create a frame element with the given parameters.
-
-    Args:
-        layout (List[List[Union[sg.Element, sg.ContainerElement]]], optional): The layout of the frame. Defaults to [[]].
-        title (str, optional): The title of the frame. Defaults to "".
-        key (str, optional): The key of the frame. Defaults to "".
-        border (int, optional): The border width of the frame. Defaults to 0.
-
-    Returns:
-        sg.Frame: The frame element.
-    """
-    return sg.Frame(
-        title=title,
-        layout=layout,
-        key=key,
-        border_width=border,
-        expand_x=True,
-        expand_y=True,
-    )
+    def _create_widgets(self):
+        main_frame = ttk.Frame(self.root)
+        main_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Control Panel
+        control_frame = ttk.Frame(main_frame)
+        control_frame.pack(fill='x', pady=10)
+        
+        # Left-aligned controls
+        self.record_btn = ttk.Button(control_frame, text="⏺ Start Recording", 
+                                    command=self.toggle_recording)
+        self.record_btn.pack(side='left', padx=5)
+        
+        self.analyze_btn = ttk.Button(control_frame, text="🔍 Analyze",
+                                    command=self.start_analysis)
+        self.analyze_btn.pack(side='left', padx=5)
+        
+        # Model Selection
+        self.model_var = tk.StringVar(value=DEFAULT_MODEL)
+        self.model_combo = ttk.Combobox(control_frame, 
+                                    textvariable=self.model_var,
+                                    values=MODELS,
+                                    state="readonly")
+        self.model_combo.pack(side='left', padx=5)
+        
+        # Position Input with label
+        ttk.Label(control_frame, text="Subject: ").pack(side='left', padx=(10, 0))
+        self.position_entry = ttk.Entry(control_frame, width=25)
+        self.position_entry.insert(0, self.current_position)
+        self.position_entry.pack(side='left', padx=(0, 10))
+        
+        # Right-aligned settings button
+        self.settings_btn = ttk.Button(control_frame, text="⚙", 
+                                    command=self._open_settings,
+                                    width=3)
+        self.settings_btn.pack(side='right', padx=5)
+        
+        # HTML Panels
+        self._create_content_panes(main_frame)
 
 
-def create_column(
-    layout: List[List[Union[sg.Element, sg.Element]]] = [[]], key: str = ""
-) -> sg.Column:
-    """
-    Create a column element with the given parameters.
+    def _create_content_panes(self, parent):
+        # Main horizontal paned window
+        main_pane = ttk.PanedWindow(parent, orient='horizontal')
+        main_pane.pack(fill='both', expand=True)
+        
+        # Left column (20% width)
+        left_pane = ttk.PanedWindow(main_pane, orient='vertical', width=350)
+        
+        # Question Panel (20% height of left pane)
+        self.question_view = HTMLScrolledText(left_pane, height=5, background="#1e1e1e")  # Absolute minimum height
+        left_pane.add(self.question_view, weight=1)  # 1 part
+        
+        # Short Answer Panel (80% height of left pane)
+        self.short_answer_view = HTMLScrolledText(left_pane, background="#1e1e1e")
+        left_pane.add(self.short_answer_view, weight=4)  # 4 parts
+        
+        # Add left pane to main with 20% width
+        main_pane.add(left_pane, weight=1)  # 1 part of total width
+        
+        # Long Answer Panel (80% width)
+        self.full_answer_view = HTMLScrolledText(main_pane, background="#1e1e1e")
+        main_pane.add(self.full_answer_view, weight=4)  # 4 parts of total width
+        
+        # Force initial size constraints
+        self.root.update_idletasks()
+        left_pane.pane(0, weight=1)  # Question pane
+        left_pane.pane(1, weight=4)  # Short answer
+        main_pane.pane(0, weight=1)  # Left column
+        main_pane.pane(1, weight=4)  # Right column
+        
+        self._initialize_content_views()
 
-    Args:
-        layout (List[List[Union[sg.Element, sg.ContainerElement]]], optional): The layout of the column. Defaults to [[]].
-        key (str, optional): The key of the column. Defaults to "".
+    def _initialize_content_views(self):
+        # Initialize with empty styled content
+        initial_html = """
+        """
+        for view in [self.question_view, self.short_answer_view, self.full_answer_view]:
+            view.set_html(initial_html)
+                
+    def _update_bindings(self):
+            """Update bindings without restart"""
+            # Unbind old keys
+            self.root.unbind(self.keybind_manager.keybinds['record'][0])
+            self.root.unbind(self.keybind_manager.keybinds['analyze'][0])
+            
+            # Load fresh config
+            self.keybind_manager.keybinds = self.keybind_manager._load_keybinds()
+            
+            # Apply new binds
+            self.root.bind(
+                self.keybind_manager.keybinds['record'][0],
+                lambda e: self.toggle_recording()
+            )
+            self.root.bind(
+                self.keybind_manager.keybinds['analyze'][0], 
+                lambda e: self.start_analysis()
+            )
+    
+    def _setup_bindings(self):
+        self._update_bindings()  # Initial setup
+    
+    def _open_settings(self):
+        """Show keybind settings dialog"""
+        KeybindDialog(self.root, self.keybind_manager)
+        
+    def toggle_recording(self):
+            if self.audio.is_recording:
+                self.audio.stop_recording()
+                self.record_btn.config(text="⏺ Start Recording")
+            else:
+                self.audio.start_recording()
+                self.record_btn.config(text="⏹ Stop Recording")
 
-    Returns:
-        sg.Column: The column element.
-    """
-    return sg.Column(
-        layout=layout,
-        key=key,
-        expand_x=True,
-        expand_y=True,
-    )
+    def _record_audio(self):
+        try:
+            self.audio.start_recording()  # Starts async recording
+            while self.audio.is_recording:  # Wait while recording
+                self.root.update()  # Keep GUI responsive
+                time.sleep(0.1)  # Prevent busy wait
+        except Exception as e:
+            logger.error(f"Recording error: {e}")
+            self.audio.stop_recording()
 
-def create_scrollable_text_area(
-    text: str = "",
-    size: Optional[Tuple[int, int]] = None,
-    key: str = "",
-    text_color: str = None,
-) -> sg.Multiline:
-    """
-    Create a scrollable text area element using sg.Multiline.
+    def start_analysis(self):
+        self._update_markdown(self.question_view, "*Transcribing audio...*")
+        threading.Thread(target=self._full_analysis_pipeline).start()
 
-    Args:
-        text (str, optional): The initial text. Defaults to "".
-        size (Optional[Tuple[int, int]], optional): The size (width, height) in characters. Defaults to None.
-        key (str, optional): The key for the element. Defaults to "".
-        text_color (str, optional): The text color. Defaults to None.
+    def _full_analysis_pipeline(self):
+        transcript = transcribe_audio(OUTPUT_FILE_NAME)
+        self._display_transcript(transcript)
+        
+        position = self.position_entry.get()
+        model = self.model_var.get()
+        
+        self._generate_answers(transcript, position, model)
 
-    Returns:
-        sg.Multiline: The Multiline element with scrollbars.
-    """
-    return sg.Multiline(
-        default_text=text,
-        size=size,
-        key=key,
-        background_color=sg.theme_background_color(),
-        text_color=text_color,
-        expand_x=True,
-        expand_y=True,
-        disabled=True,  # Makes the text area read-only
-        autoscroll=True,  # Automatically scroll to the bottom when new text is added
-    )
+    def _display_transcript(self, text):
+        self._update_markdown(self.question_view, text)
 
-def build_layout() -> (
-    List[List[Union[sg.Text, sg.Button, sg.Frame, sg.Combo, sg.Input]]]
-):
-    """
-    Build the layout of the application.
+    def _generate_answers(self, transcript, position, model):
+        self._update_markdown(self.short_answer_view, "_Generating short answer..._")
+        self._update_markdown(self.full_answer_view, "_Generating detailed answer..._")
+        
+        short_answer = generate_answer(
+            transcript, 
+            short_answer=True,
+            model=model,
+            position=position
+        )
+        
+        full_answer = generate_answer(
+            transcript,
+            short_answer=False,
+            model=model,
+            position=position
+        )
+        
+        self._update_markdown(self.short_answer_view, short_answer)
+        self._update_markdown(self.full_answer_view, full_answer)
 
-    Returns:
-        List[List[Union[sg.Text, sg.Button, sg.Frame, sg.Combo, sg.Input]]]: The layout of the application.
-    """
-    # Create elements
-    record_button: sg.Button = create_button(
-        image_data=OFF_IMAGE,
-        tooltip="Start/Stop Recording",
-        key="-RECORD_BUTTON-",
-    )
-    analyze_button: sg.Button = create_button(
-        image_data=GREY_BUTTON,
-        text="Analyze",
-        tooltip="Transcribe and Analyze",
-        key="-ANALYZE_BUTTON-",
-        subsample=2,
-    )
-    close_button: sg.Button = create_button(
-        image_data=GREY_BUTTON,
-        text="Close",
-        tooltip="Exit the application",
-        key="-CLOSE_BUTTON-",
-        subsample=2,
-    )
+    def _update_markdown(self, widget, markdown_content):
+        # Convert markdown to HTML with proper styling
+        html_content = markdown2.markdown(markdown_content)
+        full_html = f"""
+        <span style="color: white; 
+        font-family: Georgia, serif;
+        font-size: 10px">
+            {html_content}
+        </span>
+        """
+        widget.set_html(full_html)
+        widget.see("end")
 
-    transcribed_text = create_scrollable_text_area(
-        size=(APPLICATION_WIDTH, 3), key="-TRANSCRIBED_TEXT-", text_color="white"
-    )
-    quick_answer = create_scrollable_text_area(
-        size=(APPLICATION_WIDTH, 7), key="-QUICK_ANSWER-", text_color="white"
-    )
-    full_answer = create_scrollable_text_area(
-        size=(APPLICATION_WIDTH, 20), key="-FULL_ANSWER-", text_color="white"
-    )
+    def on_close(self):
+        self.is_recording = False
+        self.root.destroy()
 
-    instructions: sg.Text = create_text_area(
-        size=(int(APPLICATION_WIDTH * 0.7), 2),
-        key="-INSTRUCTIONS-",
-        text="Press 'R' to start recording\nPress 'A' to transcribe the recording and provide answers",
-    )
-
-    model = sg.Combo(
-        MODELS,
-        default_value=DEFAULT_MODEL,
-        readonly=True,
-        k="-MODEL_COMBO-",
-        s=28,
-        tooltip="Select the model to use",
-    )
-    position = sg.Input(
-        default_text="Python Developer",
-        k="-POSITION_INPUT-",
-        s=30,
-        tooltip="Enter the position you are applying for",
-        focus=False,
-    )
-
-    # Create frames
-    top_frame = create_frame(
-        layout=[
-            [name("Model"), model],
-            [name("Position"), position],
-        ],
-        key="-TOP_FRAME-",
-    )
-    instructions_frame = create_frame(
-        title="",
-        layout=[[instructions]],
-        key="-INSTRUCTIONS_FRAME-",
-    )
-    buttons_frame = create_frame(
-        layout=[[record_button], [analyze_button]],
-        key="-BUTTONS_FRAME-",
-    )
-    question_frame = create_frame(
-        title="Transcribed Question",
-        layout=[[transcribed_text]],
-        key="-QUESTION_FRAME-",
-        border=1,
-    )
-    short_answer_frame = create_frame(
-        title="Short Answer",
-        layout=[[quick_answer]],
-        key="-SHORT_ANSWER_FRAME-",
-        border=1,
-    )
-    full_answer_frame = create_frame(
-        title="Full Answer", layout=[[full_answer]], key="-FULL_ANSWER_FRAME-", border=1
-    )
-    close_button_frame = create_frame(
-        title="",
-        layout=[[close_button]],
-        key="-CLOSE_BUTTON_FRAME-",
-    )
-
-    # Create columns
-    col1 = create_column(
-        layout=[[instructions_frame], [top_frame]],
-        key="-COL1-",
-    )
-
-    col2 = create_column(
-        layout=[[buttons_frame]],
-        key="-COL2-",
-    )
-
-    col3 = create_column(
-        layout=[[question_frame], [short_answer_frame], [full_answer_frame]],
-        key="-COL3-",
-    )
-
-    col4 = create_column(
-        layout=[[close_button_frame]],
-        key="-COL4-",
-    )
-
-    layout = [[col1, col2], [col3], [col4]]
-
-    return layout
-
-
-def initialize_window() -> sg.Window:
-    """
-    Initialize the application window.
-
-    Returns:
-        sg.Window: The application window.
-    """
-    sg.theme(THEME)
-
-    layout: List[
-        List[Union[sg.Text, sg.Button, sg.Frame, sg.Combo, sg.Input]]
-    ] = build_layout()
-
-    return sg.Window(
-        "Interview",
-        layout,
-        return_keyboard_events=True,
-        use_default_focus=False,
-        resizable=True,
-    )
+    def run(self):
+        self.root.mainloop()
