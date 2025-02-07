@@ -1,3 +1,5 @@
+import os
+import sys
 import time
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
@@ -9,6 +11,8 @@ from src.gpt_query import transcribe_audio, generate_answer
 from src.config import *
 from src.audio import AudioRecorder
 from src.keybinds import KeybindManager, KeybindDialog
+import pystray
+from PIL import Image
 
 
 class InterviewGUI:
@@ -21,7 +25,11 @@ class InterviewGUI:
         self._setup_state()
         self._create_widgets()
         self._setup_bindings()
+        self._create_tray_icon()
+        self._setup_tray_bindings()
         self.audio = AudioRecorder()
+        self.tray_active = False
+        self.tray_lock = threading.Lock()
 
     def _configure_window(self):
         self.root.geometry("1000x800")
@@ -35,6 +43,43 @@ class InterviewGUI:
         self.is_recording = False
         self.audio_frames = []
         self.current_position = DEFAULT_POSITION
+
+    def _create_tray_icon(self):
+        # Create tray icon if not exists
+        if not hasattr(self, 'tray_icon'):
+            img = Image.new('RGB', (64, 64), '#2d2d2d')
+            self.tray_icon = pystray.Icon(
+                "interview_app",
+                img,
+                "( > w < ; )",
+                self._create_tray_menu()
+            )
+
+    def _create_tray_menu(self):
+        return pystray.Menu(
+            pystray.MenuItem('Open', self._show_window),
+            pystray.MenuItem('Exit', self.on_close)
+        )
+    
+    def _setup_tray_bindings(self):
+        self.root.bind("<<RecordTriggered>>", lambda e: self.toggle_recording())
+        self.root.bind("<<AnalyzeTriggered>>", lambda e: self.start_analysis())
+        
+    def _hide_to_tray(self):
+        with self.tray_lock:
+            if not self.tray_active:
+                self.root.withdraw()
+                self.tray_active = True
+                # Don't use run_detached - just update visibility
+                if not self.tray_icon._running:
+                    threading.Thread(target=self.tray_icon.run, daemon=True).start()
+        
+    def _show_window(self):
+        with self.tray_lock:
+            if self.tray_active:
+                self.root.deiconify()
+                self.tray_active = False
+                # Don't stop the icon, just hide the window
 
     def _configure_styles(self):
         bg_color = "#2d2d2d"
@@ -154,12 +199,8 @@ class InterviewGUI:
                 
     def _update_bindings(self):
             """Update bindings without restart"""
-            # Unbind old keys
-            self.root.unbind(self.keybind_manager.keybinds['record'][0])
-            self.root.unbind(self.keybind_manager.keybinds['analyze'][0])
-            
-            # Load fresh config
             self.keybind_manager.keybinds = self.keybind_manager._load_keybinds()
+            self.keybind_manager._register_hotkeys() 
             
             # Apply new binds
             self.root.bind(
@@ -235,7 +276,8 @@ class InterviewGUI:
 
     def _update_markdown(self, widget, markdown_content):
         # Convert markdown to HTML with proper styling
-        html_content = markdown2.markdown(markdown_content)
+        sanitized = markdown_content.replace("<", "&lt;").replace(">", "&gt;")
+        html_content = markdown2.markdown(sanitized)
         full_html = f"""
         <span style="color: white; 
         font-family: Georgia, serif;
@@ -247,8 +289,40 @@ class InterviewGUI:
         widget.see("end")
 
     def on_close(self):
-        self.is_recording = False
-        self.root.destroy()
+        logger.info("Full shutdown initiated")
+        # Clean up audio resources
+        try:
+            self.audio.stop_recording()
+        except Exception as e:
+            logger.error(f"Audio cleanup error: {e}")
+        
+        # Terminate system tray
+        try:
+            if self.tray_icon:
+                logger.debug("Stopping tray icon")
+                self.tray_icon.stop()
+        except Exception as e:
+            logger.error(f"Tray cleanup error: {e}")
+        
+        # Destroy Tk root
+        try:
+            if self.root:
+                logger.debug("Destroying root window")
+                self.root.quit()  # Stop mainloop()
+                self.root.destroy()
+        except Exception as e:
+            logger.error(f"Window cleanup error: {e}")
+        
+        # Force exit Python process
+        logger.debug("Terminating Python process")
+        os._exit(0)  # Direct exit, not sys.exit()
 
     def run(self):
+        self.keybind_manager.root = self.root
+        self.keybind_manager._register_hotkeys()
+        
+        # Start tray icon in a DAEMON thread
+        threading.Thread(target=self.tray_icon.run, daemon=True).start()
+        
+        # Run the main Tkinter event loop
         self.root.mainloop()

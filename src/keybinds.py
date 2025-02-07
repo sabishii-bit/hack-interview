@@ -1,11 +1,15 @@
 import json
 from pathlib import Path
 from tkinter import ttk, messagebox, Toplevel, Event
+import keyboard
 import tkinter as tk
+import pystray
+from PIL import Image
+import io
 
 DEFAULT_KEYBINDS = {
-    'record': ['<r>'],
-    'analyze': ['<a>']
+    'record': ['<control-r>'],
+    'analyze': ['<control-a>']
 }
 
 class KeybindManager:
@@ -13,10 +17,45 @@ class KeybindManager:
         self.config_path = Path(config_path)
         self.keybinds = self._load_keybinds()
         self._callbacks = []
+        self.hotkey_handles = {}
+        self.root = None
     
     def add_callback(self, callback):
         self._callbacks.append(callback)
     
+    def _register_hotkeys(self):
+        # Unregister existing hotkeys
+        for handle in self.hotkey_handles.values():
+            keyboard.remove_hotkey(handle)
+            
+        try:
+            # Add suppress=True to prevent event propagation
+            self.hotkey_handles['record'] = keyboard.add_hotkey(
+                self._format_hotkey(self.keybinds['record'][0]),
+                self._trigger_record,
+                suppress=True  # Prevent OS from handling the keypress
+            )
+            self.hotkey_handles['analyze'] = keyboard.add_hotkey(
+                self._format_hotkey(self.keybinds['analyze'][0]),
+                self._trigger_analyze,
+                suppress=True
+            )
+        except Exception as e:
+            print(f"Error registering hotkeys: {e}")
+
+    
+    def _format_hotkey(self, tk_bind):
+        """Convert Tkinter bind format to keyboard lib format"""
+        clean = tk_bind.strip('<>').replace('-', '+')
+        return clean.lower()
+    
+    def _trigger_record(self):
+        # Thread-safe GUI update
+        self.root.event_generate("<<RecordTriggered>>")
+    
+    def _trigger_analyze(self):
+        self.root.event_generate("<<AnalyzeTriggered>>")
+
     def notify_callbacks(self):
         for callback in self._callbacks:
             callback()

@@ -4,7 +4,6 @@
 .Spotlight-V100
 Thumbs.db
 $RECYCLE.BIN/
-/python3.11
 
 # VsCode
 .vscode
@@ -14,6 +13,8 @@ $RECYCLE.BIN/
 
 # Project
 record.wav
+keybinds.config
+
 # poetry.lock
 
 # Byte-compiled / optimized / DLL files

@@ -10,7 +10,7 @@ You will receive an audio transcription of the question. It may not be complete.
 """
 
 SHORT_INSTRUCTION: str = "Concisely respond, limiting your answer to around 100 words. Provide Space/Time complexity for algorithms."
-LONG_INSTRUCTION: str = "Limit long responses for code snippets. If asked about an algorithm, just provide the code, avoid extra text. When generating code snippets, avoid Markdown formatting, just use plaintext. Default to Python if language is not mentioned."
+LONG_INSTRUCTION: str = "Limit long responses for code snippets. If asked about an algorithm, just provide the code, avoid extra text, be liberal with line-breaks and avoid long one-liners. When generating code snippets, avoid Markdown formatting, just use plaintext. Default to Python if language is not mentioned. Provide example usage."
 
 load_dotenv()
 
