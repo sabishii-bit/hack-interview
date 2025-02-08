@@ -2,7 +2,7 @@
 
 ## Overview
 
-Hack Interview application is a tool designed to assist in job interviews using the power of Generative AI. Combining voice recognition and text generation technologies, this application transcribes interview questions and generates responses in real-time, empowering users to handle interviews with confidence and ease.
+Hack Interview application is a tool designed to assist in job interviews using the power of Generative AI. Combining voice recognition and text generation technologies, this application transcribes interview questions and generates responses in real-time, empowering users to handle interviews with confidence and ease. This application is a fork of the [hack-interview](https://github.com/ivnvxd/hack-interview) tool made by [ivnvxd](https://github.com/ivnvxd), made with an updated user interface that displays Markdown and brings new functionality for more versatility in real-world settings.
 
 ## ⚠️ Disclaimer ⚠️
 
@@ -10,60 +10,32 @@ Hack Interview application is a tool designed to assist in job interviews using 
 
 ## Features
 
+# Old
 - **Real-Time Audio Processing**: Records and transcribes audio seamlessly.
 - **Voice Recognition**: Uses OpenAI's Whisper model for accurate voice recognition.
 - **Intelligent Response Generation**: Leverages OpenAI's GPT models for generating concise and relevant answers.
 - **Cross-Platform Functionality**: Designed to work on various operating systems.
 - **User-Friendly Interface**: Simple, intuitive and hideous GUI for easy interaction.
 
+# New
+- **Real-Time Image Processing**: Allows users to discretely screenshot their working window for whiteboarding challenges done on the fly, ChatGPT interprets the context and provides answers.
+- **Global Key Listeners**: Listens to user-input even when the window isn't in focus, allowing discrete control of the application while screen-sharing.
+- **Key Binding Configuration**: Allows users to edit their key bindings.
+- **Updated User Interface**: This forked project builds off of the previous work allowing Markdown to be rendered in the application.
+
+# TODO:
+- Create functionality for continuous hands-off context streaming from audio to ChatGPT, retrieving a continuous stream of responses.
+- Record internal audio from the PC instead of only listening to user microphone.
+- Improve on GUI. Looks rough.
+- Implement a show/hide hotkey to hide the GUI at will.
+
 ## Requirements
 
-- **Python 3.10+**: Ensure Python is installed on your system.
+- **Python 3.11.9**: Ensure correct Python version is installed on your system. Preferred method is pyenv.
 - **OpenAI API Key**: To use OpenAI's GPT models, you will need an API key.
-- **BlackHole for MacOS**: An essential tool for recording your computer's audio output (e.g. from Zoom calls or browser tabs). Microphone Fallback: If BlackHole isn't installed or properly configured, the application can still function by recording your microphone input.
-
-## Installation
-
-1. **Clone the Repository**:
-
-   ```sh
-   git clone https://github.com/ivnvxd/hack-interview.git
-   cd hack-interview
-   ```
-
-2. **Install Dependencies**:
-
-   ```sh
-   pip install -r requirements.txt
-   ```
-
-3. **BlackHole**: If using MacOS, install [BlackHole](https://github.com/ExistentialAudio/BlackHole) and set up a [Multi Output Device](https://github.com/ExistentialAudio/BlackHole/wiki/Multi-Output-Device)
-
-4. **Environment Setup**:
-   - Add your OpenAI API key to the `.env` file. If you don't have one, you can get it [here](https://platform.openai.com/api-keys).
+- **Windows 10+**: This fork leverages the Win32 API and needs it to run.
 
 ## Usage
 
+- **Installing Dependencies**: `pip install -r requirements.txt`
 - **Starting the Application**: Run `python main.py` to launch the GUI.
-- *(optional)* **Setup**: You can choose the OpenAI model to use for response generation and the position you are being interviewed for. The default settings are set in the `src/config.py` file.
-- **Recording**: Press `R` or click the big red toggle button to start/stop audio recording. It will create a `recording.wav` file in the project directory.
-- **Transcription and Response Generation**: Press `A` or click the 'Analyze' button to transcribe the recorded audio and generate answers.
-- **Viewing Responses**: Responses are displayed in the GUI, offering both a quick and detailed answer.
-
-## Contributions
-
-Contributions are very welcome. Please submit a pull request or create an issue.
-
-## Support
-
-Thank you for using this project! If you find it helpful and would like to support my work, kindly consider buying me a coffee. Your support is greatly appreciated!
-
-<a href="https://www.buymeacoffee.com/ivnvxd" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
-
-And do not forget to give the project a star if you like it! :star:
-
-## Acknowledgments
-
-Inspired by: [hack_interview](https://github.com/slgero/hack_interview) by [slgero](https://github.com/slgero).
-
-Special thanks to the developers and contributors of the [OpenAI](https://openai.com/).
