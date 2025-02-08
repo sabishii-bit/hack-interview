@@ -2,206 +2,181 @@ import json
 from pathlib import Path
 from tkinter import ttk, messagebox, Toplevel, Event
 import keyboard
-import tkinter as tk
-import pystray
-from PIL import Image
-import io
+from threading import Thread
+from queue import Queue
+from keyboard import start_recording, stop_recording
 
 DEFAULT_KEYBINDS = {
-    'record': ['<control-r>'],
-    'analyze': ['<control-a>']
+    'record': 'ctrl+r',
+    'analyze_audio': 'ctrl+a',
+    'analyze_screenshot': 'ctrl+shift+a',
+    'screenshot': 'ctrl+q'
 }
 
 class KeybindManager:
     def __init__(self, config_path='keybinds.config'):
         self.config_path = Path(config_path)
+        self.config_path.parent.mkdir(exist_ok=True, parents=True)
         self.keybinds = self._load_keybinds()
-        self._callbacks = []
         self.hotkey_handles = {}
-        self.root = None
+        self.callbacks = []
+        if not self.config_path.exists():
+            self.save_keybinds(DEFAULT_KEYBINDS)
+        else:  # Add explicit registration of initial hotkeys
+            self._register_hotkeys()
     
     def add_callback(self, callback):
-        self._callbacks.append(callback)
+        self.callbacks.append(callback)
     
     def _register_hotkeys(self):
-        # Unregister existing hotkeys
+        # Clear existing hotkeys
         for handle in self.hotkey_handles.values():
             keyboard.remove_hotkey(handle)
-            
-        try:
-            # Add suppress=True to prevent event propagation
-            self.hotkey_handles['record'] = keyboard.add_hotkey(
-                self._format_hotkey(self.keybinds['record'][0]),
-                self._trigger_record,
-                suppress=True  # Prevent OS from handling the keypress
-            )
-            self.hotkey_handles['analyze'] = keyboard.add_hotkey(
-                self._format_hotkey(self.keybinds['analyze'][0]),
-                self._trigger_analyze,
-                suppress=True
-            )
-        except Exception as e:
-            print(f"Error registering hotkeys: {e}")
 
+        # Register new hotkeys
+        self.hotkey_handles = {
+            'record': keyboard.add_hotkey(self.keybinds['record'], lambda: self._trigger('record')),
+            'analyze_audio': keyboard.add_hotkey(self.keybinds['analyze_audio'], lambda: self._trigger('analyze_audio')),
+            'analyze_screenshot': keyboard.add_hotkey(self.keybinds['analyze_screenshot'], lambda: self._trigger('analyze_screenshot')),
+            'screenshot': keyboard.add_hotkey(self.keybinds['screenshot'], lambda: self._trigger('screenshot'))
+        }
     
-    def _format_hotkey(self, tk_bind):
-        """Convert Tkinter bind format to keyboard lib format"""
-        clean = tk_bind.strip('<>').replace('-', '+')
-        return clean.lower()
-    
-    def _trigger_record(self):
-        # Thread-safe GUI update
-        self.root.event_generate("<<RecordTriggered>>")
-    
-    def _trigger_analyze(self):
-        self.root.event_generate("<<AnalyzeTriggered>>")
+    def _trigger(self, action):
+        for callback in self.callbacks:
+            callback(action)
 
-    def notify_callbacks(self):
-        for callback in self._callbacks:
-            callback()
-    
     def _load_keybinds(self):
         try:
             if self.config_path.exists():
                 with open(self.config_path, 'r') as f:
                     loaded = json.load(f)
-                    # Ensure proper formatting of modifiers
-                    return {k: [self._format_bind(b) for b in v] 
-                           for k, v in loaded.items()}
+                    return {
+                        k: keyboard.normalize_name(v)
+                        for k, v in loaded.items()
+                    }
             return DEFAULT_KEYBINDS.copy()
         except Exception:
             return DEFAULT_KEYBINDS.copy()
-    
-    def _format_bind(self, bind_str):
-        """Ensure modifier keys use correct capitalization"""
-        modifiers = ['Control', 'Shift', 'Alt', 'Win']
-        for mod in modifiers:
-            if mod.lower() in bind_str.lower():
-                bind_str = bind_str.replace(mod.lower(), mod)
-        return bind_str
-    
+
+
     def save_keybinds(self, keybinds):
         try:
+            self.config_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Normalize before saving
+            normalized = {
+                k: keyboard.normalize_name(v)
+                for k, v in keybinds.items()
+            }
+            
             with open(self.config_path, 'w') as f:
-                json.dump(keybinds, f, indent=2)
+                json.dump(normalized, f, indent=2)
+            
+            # IMPORTANT: Update in-memory AND trigger refresh
+            self.keybinds = normalized.copy()
+            self._register_hotkeys()
+            
             return True
-        except Exception:
+        except Exception as e:
+            print(f"Error saving keybinds: {e}")
             return False
+
 
 class KeybindDialog(Toplevel):
     def __init__(self, parent, keybind_manager):
         super().__init__(parent)
+        self.configure(bg="#2d2d2d")
         self.title("Keybind Settings")
-        self.configure(bg='#2d2d2d')
         self.keybind_manager = keybind_manager
-        self.transient(parent)
-        self.grab_set()
-        self.focus_force()
-        
         self._create_widgets()
         self._load_current()
-        self._setup_bindings()
 
     def _create_widgets(self):
         main_frame = ttk.Frame(self)
         main_frame.pack(padx=10, pady=10)
-        
-        ttk.Label(main_frame, text="Record Key:").grid(row=0, column=0, sticky='w')
-        self.record_entry = KeybindEntry(main_frame, width=20)
-        self.record_entry.grid(row=0, column=1, padx=5, pady=5)
-        
-        ttk.Label(main_frame, text="Analyze Key:").grid(row=1, column=0, sticky='w')
-        self.analyze_entry = KeybindEntry(main_frame, width=20)
-        self.analyze_entry.grid(row=1, column=1, padx=5, pady=5)
-        
+
+        self.entries = {}
+        for i, (action, label) in enumerate({
+            'record': 'Record Key:',
+            'analyze_audio': 'Analyze Audio:', 
+            'analyze_screenshot': 'Analyze Screenshot:',
+            'screenshot': 'Take Screenshot:'
+        }.items()):
+            ttk.Label(main_frame, text=label).grid(row=i, column=0, sticky='w')
+            entry = KeybindEntry(main_frame, width=20)
+            entry.grid(row=i, column=1, padx=5, pady=5)
+            self.entries[action] = entry
+
         button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=2, columnspan=2, pady=10)
-        
+        button_frame.grid(row=4, columnspan=2, pady=10)  # Row after last keybind entry
         ttk.Button(button_frame, text="Save", command=self._save).pack(side='left', padx=5)
         ttk.Button(button_frame, text="Cancel", command=self.destroy).pack(side='left', padx=5)
 
-    def _setup_bindings(self):
-        self.bind('<FocusOut>', lambda e: self.focus_force())
-
     def _load_current(self):
-        self.record_entry.set_bind(self.keybind_manager.keybinds['record'][0])
-        self.analyze_entry.set_bind(self.keybind_manager.keybinds['analyze'][0])
+        for action, entry in self.entries.items():
+            entry.set_bind(self.keybind_manager.keybinds[action])
 
     def _save(self):
-        new_binds = {
-            'record': [self._validate_bind(self.record_entry.get_bind())],
-            'analyze': [self._validate_bind(self.analyze_entry.get_bind())]
-        }
-        if self.keybind_manager.save_keybinds(new_binds):
-            self.keybind_manager.notify_callbacks()  # Trigger live update
-            self.destroy()
+        new_binds = {action: entry.get_bind() for action, entry in self.entries.items()}
+        self.keybind_manager.save_keybinds(new_binds)
+        self.destroy()
 
     def _validate_bind(self, bind_str):
         """Ensure valid Tkinter binding format"""
+        # Handle standalone special characters
+        if len(bind_str) == 1 and not bind_str.isalnum():
+            return f"<{bind_str}>"
+        
+        # Clean up malformed brackets
         if not bind_str.startswith('<') or not bind_str.endswith('>'):
-            return f"<{bind_str.strip('<>')}>"
+            cleaned = bind_str.strip('<>')
+            return f"<{cleaned}>"
+        
         return bind_str
-
+    
 class KeybindEntry(ttk.Entry):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs, state='readonly')
         self.current_bind = ''
-        self.modifiers = {
-            'Control': False,
-            'Shift': False, 
-            'Alt': False
-        }
+        self.bind('<Button-1>', self._start_listening)
+        self.listening = False
+
+    def _start_listening(self, event):
+        if self.listening:
+            return
+            
+        self.listening = True
+        self.config(state='normal')
+        self.delete(0, 'end')
+        self.insert(0, 'Press NEW keys (1 sec)...')
         self.config(state='readonly')
         
-        self.bind('<KeyPress>', self._update_modifiers_press)
-        self.bind('<KeyRelease>', self._update_modifiers_release)
-        self.bind('<FocusIn>', self._reset_modifiers)
-
-    def _reset_modifiers(self, event=None):
-        for key in self.modifiers:
-            self.modifiers[key] = False
-
-    def _update_modifiers_press(self, event):
-        key = event.keysym
-        if key.startswith('Control'):
-            self.modifiers['Control'] = True
-        elif key.startswith('Shift'):
-            self.modifiers['Shift'] = True
-        elif key.startswith('Alt'):
-            self.modifiers['Alt'] = True
-        else:
-            self._process_key(event)
-
-    def _update_modifiers_release(self, event):
-        key = event.keysym
-        if key.startswith('Control'):
-            self.modifiers['Control'] = False
-        elif key.startswith('Shift'):
-            self.modifiers['Shift'] = False 
-        elif key.startswith('Alt'):
-            self.modifiers['Alt'] = False
-
-    def _process_key(self, event):
-        # Skip processing modifier-only presses
-        if event.keysym in ['Control_L', 'Control_R', 'Shift_L', 'Shift_R', 'Alt_L', 'Alt_R']:
-            return
-
-        active_mods = [k for k,v in self.modifiers.items() if v]
-        key = event.keysym
+        # Cancel any previous key reg
+        keyboard.unhook_all()
+        keyboard.start_recording()
         
-        if active_mods:
-            bind_str = f"<{'-'.join(active_mods + [key]).lower()}>"
-        else:
-            bind_str = f"<{key.lower()}>" if len(key) > 1 else key.lower()
+        # Capture fresh keys
+        self.master.after(1000, self._process_recorded)
 
-        self.set_bind(bind_str)
-        self.master.focus_set()
+    def _process_recorded(self):
+        pressed = keyboard.stop_recording()
+        new_keys = []
+        seen = set()
+        
+        for event in pressed:
+            if event.event_type == 'down' and event.name not in seen:
+                seen.add(event.name)
+                new_keys.append(event.name)
+                
+        clean_bind = '+'.join(new_keys).lower()
+        self.set_bind(clean_bind)
+        self.listening = False
 
     def set_bind(self, value):
         self.current_bind = value
         self.config(state='normal')
         self.delete(0, 'end')
-        self.insert(0, value)
+        self.insert(0, value.replace('_', '+'))  # Fix Windows key formatting
         self.config(state='readonly')
 
     def get_bind(self):

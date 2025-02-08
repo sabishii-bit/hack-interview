@@ -1,16 +1,19 @@
+import base64
+from typing import Optional
 from dotenv import load_dotenv
 from loguru import logger
 from openai import ChatCompletion, OpenAI
+import requests
 
 from src.config import DEFAULT_MODEL, DEFAULT_POSITION, OUTPUT_FILE_NAME
 
 SYS_PREFIX: str = "You are interviewing for a "
 SYS_SUFFIX: str = """ position.
-You will receive an audio transcription of the question. It may not be complete. You need to understand the question and write an answer to it.\n
+You will receive an audio transcription of the question. It may not be complete. You need to understand the question and write an answer to it. Otherwise, convey that you didn't understand and tell user to try again. \n
 """
 
 SHORT_INSTRUCTION: str = "Concisely respond, limiting your answer to around 100 words. Provide Space/Time complexity for algorithms."
-LONG_INSTRUCTION: str = "Limit long responses for code snippets. If asked about an algorithm, just provide the code, avoid extra text, be liberal with line-breaks and avoid long one-liners. When generating code snippets, avoid Markdown formatting, just use plaintext. Default to Python if language is not mentioned. Provide example usage."
+LONG_INSTRUCTION: str = "Limit long responses for code snippets. If asked about an algorithm, just provide the code, avoid extra text, avoid long one-liners. Default to Python if language is not mentioned. Provide example usage."
 
 load_dotenv()
 
@@ -86,3 +89,78 @@ def generate_answer(
         raise error
 
     return response.choices[0].message.content
+
+def generate_image_answer(
+    image_path: str,
+    short_answer: bool = True,
+    temperature: float = 0.2,
+    model: str = DEFAULT_MODEL,
+    position: str = DEFAULT_POSITION,
+) -> str:
+    """
+    Analyze an image containing interview content and generate response.
+    
+    Short Answer: Identifies key question/problem in the image
+    Long Answer: Detailed solution with analysis and improvements
+    
+    Args:
+        image_path (str): Path to image file
+        short_answer (bool): Concise problem ID vs detailed solution
+        temperature (float): 0-2 creativity level
+        model (str): GPT-4 vision model recommended
+        position (str): Target job position context
+    
+    Returns:
+        str: Analysis tailored to requested detail level
+    """
+    try:
+        # Base system prompt
+        sys_prompt = (f"You are analyzing technical interview content for a {position}. "
+                     "The user will provide an image containing either:\n"
+                     "- Algorithm challenges\n- Whiteboard designs\n- System diagrams\n- Code snippets\n\n")
+
+        # Add instruction based on answer type
+        if short_answer:
+            sys_prompt += ("Concisely respond, limiting your answer to around 100 words. Provide Space/Time complexity for algorithms.")
+        else:
+            sys_prompt += ("Limit long responses for code snippets. If asked about an algorithm, just provide the code, avoid extra text, avoid long one-liners. Default to Python if language is not mentioned. Provide example usage.")
+
+        # Encode image
+        base64_image = base64.b64encode(open(image_path, "rb").read()).decode("utf-8")
+
+        # Construct messages
+        messages = [
+            {
+                "role": "system", 
+                "content": sys_prompt
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64_image}",
+                            "detail": "high"
+                        }
+                    },
+                    {
+                        "type": "text",
+                        "text": "Analyze this technical interview content."
+                    }
+                ]
+            }
+        ]
+
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=600 if short_answer else 1500
+        )
+
+        return response.choices[0].message.content
+
+    except Exception as error:
+        logger.error(f"Image analysis failed: {error}")
+        raise error

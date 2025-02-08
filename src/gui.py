@@ -7,26 +7,26 @@ from tkhtmlview import HTMLScrolledText
 import markdown2
 import threading
 from loguru import logger
-from src.gpt_query import transcribe_audio, generate_answer
+from src.gpt_query import transcribe_audio, generate_answer, generate_image_answer
 from src.config import *
 from src.audio import AudioRecorder
 from src.keybinds import KeybindManager, KeybindDialog
 import pystray
-from PIL import Image
-
+from PIL import Image, ImageGrab, ImageTk
+from io import BytesIO
+import base64
+import win32gui
 
 class InterviewGUI:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("( > w < ; )")
         self.keybind_manager = KeybindManager()
-        self.keybind_manager.add_callback(self._update_bindings)
+        self.keybind_manager.callbacks.append(self._handle_hotkey)
         self._configure_window()
         self._setup_state()
         self._create_widgets()
-        self._setup_bindings()
         self._create_tray_icon()
-        self._setup_tray_bindings()
         self.audio = AudioRecorder()
         self.tray_active = False
         self.tray_lock = threading.Lock()
@@ -45,14 +45,16 @@ class InterviewGUI:
         self.current_position = DEFAULT_POSITION
 
     def _create_tray_icon(self):
-        # Create tray icon if not exists
         if not hasattr(self, 'tray_icon'):
             img = Image.new('RGB', (64, 64), '#2d2d2d')
             self.tray_icon = pystray.Icon(
                 "interview_app",
                 img,
                 "( > w < ; )",
-                self._create_tray_menu()
+                pystray.Menu(
+                    pystray.MenuItem('Open', self._show_window),
+                    pystray.MenuItem('Exit', self.on_close)
+                )
             )
 
     def _create_tray_menu(self):
@@ -60,10 +62,6 @@ class InterviewGUI:
             pystray.MenuItem('Open', self._show_window),
             pystray.MenuItem('Exit', self.on_close)
         )
-    
-    def _setup_tray_bindings(self):
-        self.root.bind("<<RecordTriggered>>", lambda e: self.toggle_recording())
-        self.root.bind("<<AnalyzeTriggered>>", lambda e: self.start_analysis())
         
     def _hide_to_tray(self):
         with self.tray_lock:
@@ -126,15 +124,21 @@ class InterviewGUI:
         control_frame.pack(fill='x', pady=10)
         
         # Left-aligned controls
-        self.record_btn = ttk.Button(control_frame, text="⏺ Start Recording", 
-                                    command=self.toggle_recording)
-        self.record_btn.pack(side='left', padx=5)
+        self.record_btn = ttk.Button(control_frame, text="⏺ Record Audio", 
+                                command=self.toggle_recording)
+    
+        self.analyze_audio_btn = ttk.Button(control_frame, text="🔍 Analyze Audio",
+                                        command=self.start_audio_analysis)
         
-        self.analyze_btn = ttk.Button(control_frame, text="🔍 Analyze",
-                                    command=self.start_analysis)
-        self.analyze_btn.pack(side='left', padx=5)
+        self.analyze_screenshot_btn = ttk.Button(control_frame, text="🖼 Analyze Screenshot",
+                                                command=self.start_screenshot_analysis)
+        
+        self.record_btn.pack(side='left', padx=5)
+        self.analyze_audio_btn.pack(side='left', padx=5)
+        self.analyze_screenshot_btn.pack(side='left', padx=5)
         
         # Model Selection
+        ttk.Label(control_frame, text="Model: ").pack(side='left', padx=(10, 0))
         self.model_var = tk.StringVar(value=DEFAULT_MODEL)
         self.model_combo = ttk.Combobox(control_frame, 
                                     textvariable=self.model_var,
@@ -196,24 +200,28 @@ class InterviewGUI:
         """
         for view in [self.question_view, self.short_answer_view, self.full_answer_view]:
             view.set_html(initial_html)
-                
-    def _update_bindings(self):
-            """Update bindings without restart"""
-            self.keybind_manager.keybinds = self.keybind_manager._load_keybinds()
-            self.keybind_manager._register_hotkeys() 
-            
-            # Apply new binds
-            self.root.bind(
-                self.keybind_manager.keybinds['record'][0],
-                lambda e: self.toggle_recording()
-            )
-            self.root.bind(
-                self.keybind_manager.keybinds['analyze'][0], 
-                lambda e: self.start_analysis()
-            )
-    
-    def _setup_bindings(self):
-        self._update_bindings()  # Initial setup
+
+    def _handle_hotkey(self, action):
+        handler = {
+            'record': self.toggle_recording,
+            'analyze_audio': self.start_audio_analysis,
+            'analyze_screenshot': self.start_screenshot_analysis,
+            'screenshot': self.take_screenshot
+        }
+        if handler := handler.get(action):
+            handler()
+        else:
+            logger.warning(f"Unknown action: {action}")
+
+    def take_screenshot(self):
+        try:
+            success = self.capture_focused_window()
+            if success:
+                logger.info("Saved screenshot.png")
+            else:
+                logger.error("Failed to capture window")
+        except Exception as e:
+            logger.error(f"Screenshot error: {e}")
     
     def _open_settings(self):
         """Show keybind settings dialog"""
@@ -237,11 +245,46 @@ class InterviewGUI:
             logger.error(f"Recording error: {e}")
             self.audio.stop_recording()
 
-    def start_analysis(self):
+    def start_audio_analysis(self):
         self._update_markdown(self.question_view, "*Transcribing audio...*")
-        threading.Thread(target=self._full_analysis_pipeline).start()
+        threading.Thread(target=self._full_audio_analysis_pipeline).start()
 
-    def _full_analysis_pipeline(self):
+    def start_screenshot_analysis(self):
+        if not os.path.exists("screenshot.png"):
+            logger.error("No screenshot found")
+            return
+            
+        self._update_markdown(self.question_view, "*Analyzing screenshot...*")
+        threading.Thread(target=self._full_screenshot_analysis_pipeline).start()
+
+    def _full_screenshot_analysis_pipeline(self):
+        try:
+            self._display_screenshot("screenshot.png")
+            position = self.position_entry.get()
+            model = self.model_var.get()
+            
+            short_answer = generate_image_answer(
+                "screenshot.png",
+                short_answer=True,
+                model=model,
+                position=position
+            )
+            
+            full_answer = generate_image_answer(
+                "screenshot.png",
+                short_answer=False,
+                model=model,
+                position=position
+            )
+            
+            self._update_markdown(self.short_answer_view, short_answer)
+            self._update_markdown(self.full_answer_view, full_answer)
+            
+        except Exception as e:
+            logger.error(f"Screenshot analysis failed: {e}")
+            self._update_markdown(self.question_view, "Analysis failed - check logs")
+
+    def _full_audio_analysis_pipeline(self):
         transcript = transcribe_audio(OUTPUT_FILE_NAME)
         self._display_transcript(transcript)
         
@@ -253,9 +296,35 @@ class InterviewGUI:
     def _display_transcript(self, text):
         self._update_markdown(self.question_view, text)
 
+    def _display_screenshot(self, image_path):
+        """Display thumbnail in question pane"""
+        try:
+            self._update_markdown(self.short_answer_view, "Generating short answer...")
+            self._update_markdown(self.full_answer_view, "Generating detailed answer...")
+
+            # Create thumbnail
+            img = Image.open(image_path)
+            img.thumbnail((300, 300))
+            
+            # Convert to base64
+            buffered = BytesIO()
+            img.save(buffered, format="PNG")
+            img_str = base64.b64encode(buffered.getvalue()).decode()
+            
+            # Create HTML with image
+            html_content = f"""
+                <img src="data:image/png;base64,{img_str}" 
+                        style="max-width: 300px; margin: 10px 0; border-radius: 5px; border: 1px solid #454545">
+            """
+            self._update_markdown(self.question_view, html_content, is_html=True)
+            
+        except Exception as e:
+            logger.error(f"Failed to display screenshot: {e}")
+            self._update_markdown(self.question_view, "*Loaded screenshot*")
+
     def _generate_answers(self, transcript, position, model):
-        self._update_markdown(self.short_answer_view, "_Generating short answer..._")
-        self._update_markdown(self.full_answer_view, "_Generating detailed answer..._")
+        self._update_markdown(self.short_answer_view, "Generating short answer...")
+        self._update_markdown(self.full_answer_view, "Generating detailed answer...")
         
         short_answer = generate_answer(
             transcript, 
@@ -274,17 +343,34 @@ class InterviewGUI:
         self._update_markdown(self.short_answer_view, short_answer)
         self._update_markdown(self.full_answer_view, full_answer)
 
-    def _update_markdown(self, widget, markdown_content):
-        # Convert markdown to HTML with proper styling
-        sanitized = markdown_content.replace("<", "&lt;").replace(">", "&gt;")
-        html_content = markdown2.markdown(sanitized)
+    def capture_focused_window(self):
+        """Simplified screenshot capture"""
+        try:
+            hwnd = win32gui.GetForegroundWindow()
+            if not hwnd:
+                return False
+            rect = win32gui.GetWindowRect(hwnd)
+            left, top, right, bottom = rect
+            ImageGrab.grab((left, top, right, bottom)).save("screenshot.png")
+            return True
+        except Exception as e:
+            logger.error(f"Screenshot failed: {str(e)}")
+            return False
+            
+        except Exception as e:
+            logger.error(f"Screenshot failed: {str(e)}")
+            return False
+
+    def _update_markdown(self, widget, content, is_html=False):
+        """Updated to handle HTML input"""
         full_html = f"""
-        <span style="color: white; 
-        font-family: Georgia, serif;
-        font-size: 10px">
-            {html_content}
-        </span>
+            <span style="color: white; 
+            font-family: Georgia, serif;
+            font-size: 10px">
+                {content if is_html else markdown2.markdown(content, extras=["fenced-code-blocks", "code-friendly"])}
+            </span>
         """
+        
         widget.set_html(full_html)
         widget.see("end")
 
