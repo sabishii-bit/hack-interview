@@ -10,20 +10,20 @@ Hack Interview application is a tool designed to assist in job interviews using 
 
 ## Features
 
-# Old
+##### Old
 - **Real-Time Audio Processing**: Records and transcribes audio seamlessly.
 - **Voice Recognition**: Uses OpenAI's Whisper model for accurate voice recognition.
 - **Intelligent Response Generation**: Leverages OpenAI's GPT models for generating concise and relevant answers.
 - **Cross-Platform Functionality**: Designed to work on various operating systems.
 - **User-Friendly Interface**: Simple, intuitive and hideous GUI for easy interaction.
 
-# New
+##### New
 - **Real-Time Image Processing**: Allows users to discretely screenshot their working window for whiteboarding challenges done on the fly, ChatGPT interprets the context and provides answers.
 - **Global Key Listeners**: Listens to user-input even when the window isn't in focus, allowing discrete control of the application while screen-sharing.
 - **Key Binding Configuration**: Allows users to edit their key bindings.
 - **Updated User Interface**: This forked project builds off of the previous work allowing Markdown to be rendered in the application.
 
-# TODO:
+##### TODO:
 - Create functionality for continuous hands-off context streaming from audio to ChatGPT, retrieving a continuous stream of responses.
 - Record internal audio from the PC instead of only listening to user microphone.
 - Improve on GUI. Looks rough.
